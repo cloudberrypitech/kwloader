@@ -1,20 +1,25 @@
+[project]
+name = "kwloader"
+version = "1.0.0"
+description = "A Python document loader for ODF, ODT, DOCX, and DOTX files."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Cloudberry Pi Technology" }
+]
+
+dependencies = [
+    "odfpy>=1.4.1,<2.0.0",
+    "python-docx>=1.2.0,<2.0.0"
+]
+
 [build-system]
 requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
-[project]
-name = "kwloader"
-version = "0.1.0"
-description = "Document loading and formatting extraction for Kwiddle"
-readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "odfpy>=1.4.1,<2.0.0",
-    "python-docx>=1.2.0,<2.0.0",
-]
-
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
