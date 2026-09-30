@@ -1,0 +1,13 @@
+LICENSE
+README.md
+pyproject.toml
+src/kwloader/__init__.py
+src/kwloader/loader.py
+src/kwloader/models.py
+src/kwloader/odf_loader.py
+src/kwloader/word_loader.py
+src/kwloader.egg-info/PKG-INFO
+src/kwloader.egg-info/SOURCES.txt
+src/kwloader.egg-info/dependency_links.txt
+src/kwloader.egg-info/requires.txt
+src/kwloader.egg-info/top_level.txt
