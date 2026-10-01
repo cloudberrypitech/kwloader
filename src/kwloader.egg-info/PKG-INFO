@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: kwloader
-Version: 1.0.0
+Version: 1.1.0
 Summary: A Python document loader for ODF, ODT, DOCX, and DOTX files.
 Author: Cloudberry Pi Technology
 License: MIT License

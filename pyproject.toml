@@ -1,6 +1,6 @@
 [project]
 name = "kwloader"
-version = "1.0.0"
+version = "1.1.0"
 description = "A Python document loader for ODF, ODT, DOCX, and DOTX files."
 readme = "README.md"
 requires-python = ">=3.13"
