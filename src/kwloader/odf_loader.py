@@ -273,6 +273,9 @@ def load_odf(path: str | Path) -> BookDocument:
         if block.kind == "heading" and block.text.strip():
             title = block.text.strip()
             break
+        if block.kind == "title" and block.text.strip():
+            title = block.text.strip
+            break
 
     if title == path.stem.replace("_", " ").replace("-", " ").title():
         for block in blocks:
