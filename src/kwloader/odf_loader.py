@@ -356,6 +356,8 @@ class ODFLoader:
                                             attributes={"anchored_frame": True,
                                                         "anchor_type": child.get(q("text", "anchor-type")),
                                                         "frame_style": style_name}))
+            elif tag == q("draw", "g"):
+                blocks.extend(self._parse_children(child))
             elif tag in {q("draw", "custom-shape"), q("draw", "rect"),
                          q("draw", "ellipse"), q("draw", "line"),
                          q("draw", "connector"), q("draw", "polygon"),
@@ -488,6 +490,27 @@ class ODFLoader:
             elif href:
                 label = frame.get(q("svg", "title")) or posixpath.basename(href)
                 result.append(TextRun(f"[Linked image: {label}]", style, link))
+
+        for text_box in frame.iter(q("draw", "text-box")):
+            paragraphs = [
+                _text_content(node).strip()
+                for node in text_box.iter()
+                if node.tag in {q("text", "p"), q("text", "h")}
+            ]
+            text = "\n".join(value for value in paragraphs if value)
+            if text:
+                result.append(TextRun(text, style, link))
+
+        if not result:
+            embedded = next(iter(frame.iter(q("draw", "object"))), None)
+            plugin = next(iter(frame.iter(q("draw", "plugin"))), None)
+            object_node = embedded or plugin
+            href = object_node.get(q("xlink", "href")) if object_node is not None else None
+            if href:
+                result.append(TextRun(
+                    f"[Embedded object: {posixpath.basename(href.rstrip('/'))}]",
+                    style, link,
+                ))
         return result
 
     def _get_image(self, href):
