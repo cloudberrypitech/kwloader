@@ -50,6 +50,9 @@ CONTENT_XML = """<?xml version="1.0" encoding="UTF-8"?>
   <draw:frame draw:name="Text box" text:anchor-type="paragraph">
    <draw:text-box><text:p>Text inside a drawing frame</text:p></draw:text-box>
   </draw:frame>
+  <draw:frame draw:name="Embedded chart preview" svg:title="Sales chart">
+   <draw:object xlink:href="./Chart 1"/>
+  </draw:frame>
   <table:table table:name="Styled table">
    <table:table-row>
     <table:table-cell table:style-name="BlueCell"><text:p>Cell value</text:p></table:table-cell>
@@ -78,6 +81,7 @@ MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
  <manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/>
  <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
  <manifest:file-entry manifest:full-path="Media/pixel.png" manifest:media-type="image/png"/>
+ <manifest:file-entry manifest:full-path="ObjectReplacements/Chart 1" manifest:media-type="image/png"/>
 </manifest:manifest>
 """
 
@@ -89,6 +93,7 @@ def make_odt(path: Path) -> None:
         package.writestr("styles.xml", STYLES_XML)
         package.writestr("META-INF/manifest.xml", MANIFEST_XML)
         package.writestr("Media/pixel.png", PIXEL_PNG)
+        package.writestr("ObjectReplacements/Chart 1", PIXEL_PNG)
 
 
 def test_inline_package_image_and_inherited_paragraph_style(tmp_path: Path) -> None:
@@ -123,6 +128,9 @@ def test_inline_package_image_and_inherited_paragraph_style(tmp_path: Path) -> N
 
     text_frame = document.blocks[3]
     assert any(run.text == "Text inside a drawing frame" for run in text_frame.runs)
+
+    embedded_chart = document.blocks[4]
+    assert any(run.image is not None for run in embedded_chart.runs)
 
 
 def test_table_cell_style_is_preserved(tmp_path: Path) -> None:
