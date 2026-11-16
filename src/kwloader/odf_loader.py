@@ -347,6 +347,23 @@ class ODFLoader:
                 blocks.append(self._list(child))
             elif tag == q("table", "table"):
                 blocks.append(self._table(child))
+            elif tag == q("draw", "frame"):
+                style_name = child.get(q("draw", "style-name"))
+                frame_style = self._text_style(self._resolve_for_family(style_name, "graphic"))
+                runs = self._frame_runs(child, frame_style, None)
+                if runs:
+                    blocks.append(TextBlock("paragraph", runs=runs, style=frame_style,
+                                            attributes={"anchored_frame": True,
+                                                        "anchor_type": child.get(q("text", "anchor-type")),
+                                                        "frame_style": style_name}))
+            elif tag in {q("draw", "custom-shape"), q("draw", "rect"),
+                         q("draw", "ellipse"), q("draw", "line"),
+                         q("draw", "connector"), q("draw", "polygon"),
+                         q("draw", "polyline"), q("draw", "path")}:
+                value = _text_content(child).strip()
+                if value:
+                    blocks.append(TextBlock("paragraph", runs=[TextRun(value)],
+                                            attributes={"drawing_shape": _local(tag)}))
             elif tag == q("text", "section"):
                 blocks.append(TextBlock("section", children=self._parse_children(child),
                                         attributes={"name": child.get(q("text", "name"))}))
