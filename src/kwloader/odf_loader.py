@@ -510,10 +510,22 @@ class ODFLoader:
             object_node = embedded or plugin
             href = object_node.get(q("xlink", "href")) if object_node is not None else None
             if href:
-                result.append(TextRun(
-                    f"[Embedded object: {posixpath.basename(href.rstrip('/'))}]",
-                    style, link,
-                ))
+                preview = self._get_image("ObjectReplacements/" + posixpath.basename(href.rstrip("/")))
+                if preview:
+                    preview_asset = ImageAsset(
+                        preview.name, preview.mime_type, preview.data, href=preview.href,
+                        width=frame.get(q("svg", "width")),
+                        height=frame.get(q("svg", "height")),
+                        alt_text=frame.get(q("svg", "title")) or frame.get(q("draw", "name")) or "Embedded object preview",
+                        title=frame.get(q("svg", "title")) or frame.get(q("draw", "name")),
+                        properties=dict(frame.attrib),
+                    )
+                    result.append(TextRun("", style, link, preview_asset))
+                else:
+                    result.append(TextRun(
+                        f"[Embedded object: {posixpath.basename(href.rstrip('/'))}]",
+                        style, link,
+                    ))
         return result
 
     def _get_image(self, href):
@@ -543,8 +555,14 @@ class ODFLoader:
         while normalized.startswith("../"):
             normalized = normalized[3:]
             candidates.append(normalized)
-        candidates.extend([posixpath.basename(normalized),
-                           "Pictures/" + posixpath.basename(normalized)])
+        basename = posixpath.basename(normalized)
+        candidates.extend([
+            basename,
+            "Pictures/" + basename,
+            "ObjectReplacements/" + basename,
+        ])
+        for extension in (".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp"):
+            candidates.append("ObjectReplacements/" + basename + extension)
         for candidate in candidates:
             asset = self._image_by_href.get(candidate)
             if asset:
