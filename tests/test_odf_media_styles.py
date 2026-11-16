@@ -36,15 +36,15 @@ CONTENT_XML = """<?xml version="1.0" encoding="UTF-8"?>
  <office:body><office:text>
   <text:p text:style-name="ChildParagraph">Before<text:s text:c="3"/>
    <draw:frame draw:name="Inline picture" text:anchor-type="as-char" svg:width="1in" svg:height="1in">
-    <draw:image xlink:href="./Pictures/pixel.png" svg:title="One pixel"/>
+    <draw:image xlink:href="./Media/pixel.png" svg:title="One pixel"/>
    </draw:frame>After
   </text:p>
   <draw:frame draw:name="Page anchored picture" text:anchor-type="page" svg:width="1in" svg:height="1in">
-   <draw:image xlink:href="Pictures/pixel.png" svg:title="Page image"/>
+   <draw:image xlink:href="Media/pixel.png" svg:title="Page image"/>
   </draw:frame>
   <draw:g>
    <draw:frame draw:name="Grouped picture" text:anchor-type="paragraph" svg:width="1in" svg:height="1in">
-    <draw:image xlink:href="Pictures/pixel.png" svg:title="Grouped image"/>
+    <draw:image xlink:href="Media/pixel.png" svg:title="Grouped image"/>
    </draw:frame>
   </draw:g>
   <draw:frame draw:name="Text box" text:anchor-type="paragraph">
@@ -77,7 +77,7 @@ MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
  xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0">
  <manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/>
  <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
- <manifest:file-entry manifest:full-path="Pictures/pixel.png" manifest:media-type="image/png"/>
+ <manifest:file-entry manifest:full-path="Media/pixel.png" manifest:media-type="image/png"/>
 </manifest:manifest>
 """
 
@@ -88,7 +88,7 @@ def make_odt(path: Path) -> None:
         package.writestr("content.xml", CONTENT_XML)
         package.writestr("styles.xml", STYLES_XML)
         package.writestr("META-INF/manifest.xml", MANIFEST_XML)
-        package.writestr("Pictures/pixel.png", PIXEL_PNG)
+        package.writestr("Media/pixel.png", PIXEL_PNG)
 
 
 def test_inline_package_image_and_inherited_paragraph_style(tmp_path: Path) -> None:
