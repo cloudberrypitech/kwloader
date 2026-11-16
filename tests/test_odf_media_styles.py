@@ -42,6 +42,14 @@ CONTENT_XML = """<?xml version="1.0" encoding="UTF-8"?>
   <draw:frame draw:name="Page anchored picture" text:anchor-type="page" svg:width="1in" svg:height="1in">
    <draw:image xlink:href="Pictures/pixel.png" svg:title="Page image"/>
   </draw:frame>
+  <draw:g>
+   <draw:frame draw:name="Grouped picture" text:anchor-type="paragraph" svg:width="1in" svg:height="1in">
+    <draw:image xlink:href="Pictures/pixel.png" svg:title="Grouped image"/>
+   </draw:frame>
+  </draw:g>
+  <draw:frame draw:name="Text box" text:anchor-type="paragraph">
+   <draw:text-box><text:p>Text inside a drawing frame</text:p></draw:text-box>
+  </draw:frame>
   <table:table table:name="Styled table">
    <table:table-row>
     <table:table-cell table:style-name="BlueCell"><text:p>Cell value</text:p></table:table-cell>
@@ -108,6 +116,13 @@ def test_inline_package_image_and_inherited_paragraph_style(tmp_path: Path) -> N
     page_frame = document.blocks[1]
     assert page_frame.attributes["anchored_frame"] is True
     assert any(run.image is not None for run in page_frame.runs)
+
+    grouped_frame = document.blocks[2]
+    assert grouped_frame.attributes["anchored_frame"] is True
+    assert any(run.image is not None for run in grouped_frame.runs)
+
+    text_frame = document.blocks[3]
+    assert any(run.text == "Text inside a drawing frame" for run in text_frame.runs)
 
 
 def test_table_cell_style_is_preserved(tmp_path: Path) -> None:
