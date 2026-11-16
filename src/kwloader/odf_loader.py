@@ -316,7 +316,8 @@ class ODFLoader:
                      "page_layout_name": master.get(q("style", "page-layout-name"))}
             for child in master:
                 if child.tag in {q("style", "header"), q("style", "footer"),
-                                 q("style", "header-left"), q("style", "footer-left")}:
+                                 q("style", "header-left"), q("style", "footer-left"),
+                                 q("style", "header-first"), q("style", "footer-first")}:
                     entry[_local(child.tag)] = "\n".join(
                         _text_content(p) for p in child.iter()
                         if p.tag in {q("text", "p"), q("text", "h")}
