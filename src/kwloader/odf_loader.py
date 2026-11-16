@@ -184,6 +184,7 @@ class ODFLoader:
                     "levels": [
                         {
                             "kind": _local(level.tag),
+                            "level": level.get(q("text", "level"), "1"),
                             "bullet_char": level.get(q("text", "bullet-char")),
                             "num_format": level.get(q("style", "num-format")),
                             "num_prefix": level.get(q("style", "num-prefix"), ""),
