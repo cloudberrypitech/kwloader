@@ -131,18 +131,44 @@ class ODFLoader:
         return result
 
     def _extract_images(self, package):
+        """Load every package-embedded image and index it by its ODF href."""
+        manifest_types = {}
+        try:
+            manifest = ET.fromstring(package.read("META-INF/manifest.xml"))
+            for entry in manifest.iter(q("manifest", "file-entry")):
+                path = entry.get(q("manifest", "full-path"))
+                media = entry.get(q("manifest", "media-type"))
+                if path and media:
+                    manifest_types[posixpath.normpath(path)] = media
+        except (KeyError, ET.ParseError, OSError):
+            pass
+
+        known_image_types = {
+            ".svg": "image/svg+xml", ".svgz": "image/svg+xml",
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+            ".tif": "image/tiff", ".tiff": "image/tiff", ".ico": "image/x-icon",
+        }
         for name in package.namelist():
-            normalized = posixpath.normpath(name)
-            if not normalized.startswith("Pictures/") or normalized.endswith("/"):
+            if not name or name.endswith("/"):
+                continue
+            normalized = posixpath.normpath(name).lstrip("/")
+            if normalized in {"mimetype", "META-INF/manifest.xml"}:
+                continue
+            mime = (manifest_types.get(normalized)
+                    or mimetypes.guess_type(normalized)[0]
+                    or known_image_types.get(Path(normalized).suffix.lower()))
+            if not mime or not mime.lower().startswith("image/"):
                 continue
             try:
                 data = package.read(name)
-            except (KeyError, OSError):
+            except (KeyError, OSError, RuntimeError):
                 continue
-            mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
-            asset = ImageAsset(Path(name).name, mime, data, href=name)
+            asset = ImageAsset(Path(normalized).name, mime, data, href=normalized)
             self.images.append(asset)
+            self._image_by_href[normalized] = asset
             self._image_by_href[name] = asset
+            self._image_by_href.setdefault(posixpath.basename(normalized), asset)
 
     def _read_styles(self, root):
         for face in root.iter(q("style", "font-face")):
@@ -156,8 +182,16 @@ class ODFLoader:
                 self.styles[f"__list_{list_name}"] = {
                     "name": list_name, "family": "list",
                     "levels": [
-                        {"kind": _local(level.tag), "attributes": dict(level.attrib),
-                         "properties": { _local(child.tag): dict(child.attrib) for child in level }}
+                        {
+                            "kind": _local(level.tag),
+                            "bullet_char": level.get(q("text", "bullet-char")),
+                            "num_format": level.get(q("style", "num-format")),
+                            "num_prefix": level.get(q("style", "num-prefix"), ""),
+                            "num_suffix": level.get(q("style", "num-suffix"), "."),
+                            "start_value": level.get(q("text", "start-value"), "1"),
+                            "attributes": dict(level.attrib),
+                            "properties": {_local(child.tag): dict(child.attrib) for child in level},
+                        }
                         for level in list_style
                     ],
                 }
@@ -191,6 +225,24 @@ class ODFLoader:
         result.update(entry.get("properties", {}))
         return result
 
+    def _resolve_for_family(self, name: str | None, family: str) -> dict:
+        """Resolve default text + family defaults + named/automatic style inheritance."""
+        result = {}
+        if family != "text":
+            result.update(self._resolve("__default_text"))
+        result.update(self._resolve(f"__default_{family}"))
+        if name:
+            entry = self.styles.get(name)
+            if entry and entry.get("family") in {None, family, "text" if family == "text" else family}:
+                result.update(self._resolve(name))
+            elif entry:
+                # Paragraph styles also provide character properties to their own runs.
+                result.update(self._resolve(name))
+        return result
+
+    def _style_name(self, element, attr="style-name"):
+        return element.get(q("text", attr)) or element.get(q("draw", attr)) or element.get(q("table", attr))
+
     def _style_name(self, element, attr="style-name"):
         return element.get(q("text", attr)) or element.get(q("draw", attr)) or element.get(q("table", attr))
 
@@ -221,7 +273,7 @@ class ODFLoader:
         )
 
     def _paragraph_properties(self, name):
-        props = self._resolve(name)
+        props = self._resolve_for_family(name, "paragraph")
         return {
             "align": props.get(q("fo", "text-align")) or props.get(q("style", "text-align")),
             "margin_left": props.get(q("fo", "margin-left")),
@@ -234,6 +286,15 @@ class ODFLoader:
             "break_before": props.get(q("fo", "break-before")),
             "break_after": props.get(q("fo", "break-after")),
             "keep_together": props.get(q("fo", "keep-together")),
+            "keep_with_next": props.get(q("fo", "keep-with-next")),
+            "widows": props.get(q("fo", "widows")),
+            "orphans": props.get(q("fo", "orphans")),
+            "border": props.get(q("fo", "border")),
+            "padding": props.get(q("fo", "padding")),
+            "direction": props.get(q("fo", "direction")),
+            "writing_mode": props.get(q("style", "writing-mode")),
+            "text_transform": props.get(q("fo", "text-transform")),
+            "hyphenate": props.get(q("fo", "hyphenate")),
             "raw": props,
         }
 
@@ -312,40 +373,67 @@ class ODFLoader:
         attrs["outline_level"] = element.get(q("text", "outline-level"))
         attrs["class_names"] = element.get(q("text", "class-names"))
         attrs["raw_style"] = props.get("raw", {})
-        base_text_style = self._text_style(self._resolve(name) or self._resolve("__default_paragraph"))
+        attrs["style_properties"] = props.get("raw", {})
+        base_text_style = self._text_style(props.get("raw", {}))
         return TextBlock(kind, self._inline_runs(element, base_text_style), props.get("align"), name,
                          attributes=attrs, style=base_text_style)
 
     def _inline_runs(self, parent, inherited=None, link=None):
-        inherited = inherited or self._text_style(self._resolve("__default_text"))
+        inherited = inherited or self._text_style(self._resolve_for_family(None, "text"))
         runs = []
         if parent.text:
             runs.append(TextRun(parent.text, inherited, link))
         for child in list(parent):
             tag = child.tag
-            name = child.get(q("text", "style-name")) or child.get(q("draw", "style-name"))
-            props = self._resolve(name)
-            child_style = self._text_style(props) if props else inherited
-            if props and inherited.raw:
-                merged = dict(inherited.raw); merged.update(props)
-                child_style = self._text_style(merged)
-            child_link = link
-            if tag == q("text", "a"):
-                child_link = child.get(q("xlink", "href"))
-            if tag == q("text", "s"):
-                count = int(child.get(q("text", "c"), "1"))
-                runs.append(TextRun(" " * max(1, count), child_style, child_link))
-            elif tag == q("text", "tab"):
-                runs.append(TextRun("\t", child_style, child_link))
-            elif tag == q("text", "line-break"):
-                runs.append(TextRun("\n", child_style, child_link))
-            elif tag == q("draw", "frame"):
-                runs.extend(self._frame_runs(child, child_style, child_link))
+            name = child.get(q("text", "style-name"))
+            if tag == q("draw", "frame"):
+                runs.extend(self._frame_runs(child, inherited, link))
+            elif tag in {q("text", "s"), q("text", "tab"), q("text", "line-break")}:
+                if name:
+                    merged = dict(inherited.raw)
+                    merged.update(self._resolve_for_family(name, "text"))
+                    child_style = self._text_style(merged)
+                else:
+                    child_style = inherited
+                child_link = link
+                if tag == q("text", "s"):
+                    try:
+                        count = max(1, min(10000, int(child.get(q("text", "c"), "1"))))
+                    except (TypeError, ValueError):
+                        count = 1
+                    runs.append(TextRun(" " * count, child_style, child_link))
+                elif tag == q("text", "tab"):
+                    runs.append(TextRun("\t", child_style, child_link))
+                else:
+                    runs.append(TextRun("\n", child_style, child_link))
+            elif tag == q("text", "a"):
+                child_link = child.get(q("xlink", "href")) or link
+                child_props = self._resolve_for_family(name, "text") if name else {}
+                merged = dict(inherited.raw)
+                merged.update(child_props)
+                merged.update({key: value for key, value in child.attrib.items()
+                               if key.startswith("{" + NS["fo"] + "}")})
+                child_style = self._text_style(merged) if child_props or merged else inherited
+                runs.extend(self._inline_runs(child, child_style, child_link))
             elif tag in {q("text", "note"), q("text", "ruby")}:
                 value = _text_content(child)
                 if value:
-                    runs.append(TextRun(value, child_style, child_link))
+                    runs.append(TextRun(value, inherited, link))
+            elif tag in {q("draw", "custom-shape"), q("draw", "rect"),
+                         q("draw", "ellipse"), q("draw", "line"),
+                         q("draw", "connector"), q("draw", "polygon"),
+                         q("draw", "polyline"), q("draw", "path")}:
+                value = _text_content(child).strip()
+                if value:
+                    runs.append(TextRun(value, inherited, link))
             else:
+                child_props = self._resolve_for_family(name, "text") if name else {}
+                merged = dict(inherited.raw)
+                merged.update(child_props)
+                merged.update({key: value for key, value in child.attrib.items()
+                               if key.startswith("{" + NS["fo"] + "}")})
+                child_style = self._text_style(merged) if child_props or merged else inherited
+                child_link = link
                 runs.extend(self._inline_runs(child, child_style, child_link))
             if child.tail:
                 runs.append(TextRun(child.tail, inherited, link))
@@ -353,70 +441,165 @@ class ODFLoader:
 
     def _frame_runs(self, frame, style, link):
         result = []
-        for image_node in frame.iter(q("draw", "image")):
+        image_nodes = list(frame.iter(q("draw", "image")))
+        for image_node in image_nodes:
             href = image_node.get(q("xlink", "href"), "")
             asset = self._get_image(href)
             if asset:
-                asset.width = frame.get(q("svg", "width"))
-                asset.height = frame.get(q("svg", "height"))
-                asset.alt_text = image_node.get(q("svg", "title")) or image_node.get(q("svg", "desc"))
-                asset.title = image_node.get(q("svg", "title"))
-                asset.properties = dict(frame.attrib)
-                asset.properties.update({"wrap": frame.get(q("style", "wrap")),
-                                         "run_through": frame.get(q("style", "run-through")),
-                                         "anchor_type": frame.get(q("text", "anchor-type")),
-                                         "z_index": frame.get(q("draw", "z-index"))})
-                result.append(TextRun("", style, link, asset))
+                frame_asset = ImageAsset(
+                    asset.name, asset.mime_type, asset.data, href=asset.href,
+                    width=frame.get(q("svg", "width")),
+                    height=frame.get(q("svg", "height")),
+                    alt_text=(image_node.get(q("svg", "title"))
+                              or image_node.get(q("svg", "desc"))
+                              or frame.get(q("svg", "title"))
+                              or frame.get(q("svg", "desc"))),
+                    title=image_node.get(q("svg", "title")) or frame.get(q("svg", "title")),
+                    properties=dict(frame.attrib),
+                )
+                frame_asset.properties.update({
+                    "wrap": frame.get(q("style", "wrap")),
+                    "run_through": frame.get(q("style", "run-through")),
+                    "anchor_type": frame.get(q("text", "anchor-type")),
+                    "z_index": frame.get(q("draw", "z-index")),
+                    "horizontal_pos": frame.get(q("style", "horizontal-pos")),
+                    "horizontal_rel": frame.get(q("style", "horizontal-rel")),
+                    "vertical_pos": frame.get(q("style", "vertical-pos")),
+                    "vertical_rel": frame.get(q("style", "vertical-rel")),
+                })
+                result.append(TextRun("", style, link, frame_asset))
+            elif href:
+                label = frame.get(q("svg", "title")) or posixpath.basename(href)
+                result.append(TextRun(f"[Linked image: {label}]", style, link))
         return result
 
     def _get_image(self, href):
         if not href:
             return None
-        href = unquote(href)
+        href = unquote(href).strip()
         if href.startswith("data:"):
             try:
                 header, payload = href.split(",", 1)
                 mime = header[5:].split(";", 1)[0] or "application/octet-stream"
-                data = base64.b64decode(payload) if ";base64" in header else unquote(payload).encode()
-                name = f"embedded-{len(self.images) + 1}"
-                asset = ImageAsset(name, mime, data, href=href)
+                if ";base64" in header:
+                    data = base64.b64decode(payload, validate=False)
+                else:
+                    from urllib.parse import unquote_to_bytes
+                    data = unquote_to_bytes(payload)
+                asset = ImageAsset(f"embedded-{len(self.images) + 1}", mime, data, href=href)
                 self.images.append(asset)
                 return asset
             except Exception:
                 return None
-        normalized = posixpath.normpath(href)
-        return self._image_by_href.get(normalized) or self._image_by_href.get(posixpath.basename(normalized))
+        if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", href) or href.startswith("//"):
+            # Do not fetch remote images while opening a document.
+            return None
+        href = href.split("#", 1)[0].split("?", 1)[0]
+        normalized = posixpath.normpath(href.lstrip("/"))
+        candidates = [normalized]
+        while normalized.startswith("../"):
+            normalized = normalized[3:]
+            candidates.append(normalized)
+        candidates.extend([posixpath.basename(normalized),
+                           "Pictures/" + posixpath.basename(normalized)])
+        for candidate in candidates:
+            asset = self._image_by_href.get(candidate)
+            if asset:
+                return asset
+        basename = posixpath.basename(normalized)
+        return next((asset for asset in self.images if asset.name == basename), None)
 
     def _list(self, element):
         items = []
-        for item in element.findall("text:list-item", NS) + element.findall("text:ordered-list", NS):
-            items.append(TextBlock("list_item", children=self._parse_children(item)))
-        for item in element.findall("text:list-header", NS):
-            items.append(TextBlock("list_header", children=self._parse_children(item)))
+        for item in list(element):
+            if item.tag == q("text", "list-item"):
+                items.append(TextBlock("list_item", children=self._parse_children(item)))
+            elif item.tag == q("text", "list-header"):
+                items.append(TextBlock("list_header", children=self._parse_children(item)))
         list_style_name = element.get(q("text", "style-name"))
         return TextBlock("list", children=items,
                          attributes={"style_name": list_style_name,
                                      "list_style": self.styles.get(f"__list_{list_style_name}", {}),
                                      "continue_numbering": element.get(q("text", "continue-numbering")),
-                                     "continue_list": element.get(q("text", "continue-list"))})
+                                     "continue_list": element.get(q("text", "continue-list")),
+                                     "level": element.get(q("text", "level"), "1")})
 
     def _table(self, element):
+        def safe_int(value, default=1):
+            try:
+                return max(1, min(1000, int(value)))
+            except (TypeError, ValueError):
+                return default
+
+        table_style_name = element.get(q("table", "style-name"))
+        table_props = self._resolve_for_family(table_style_name, "table")
+        columns = []
+        for child in list(element):
+            if child.tag != q("table", "table-column"):
+                continue
+            style_name = child.get(q("table", "style-name"))
+            column_props = self._resolve_for_family(style_name, "table-column")
+            columns.append({
+                "style_name": style_name,
+                "width": column_props.get(q("style", "column-width")),
+                "repeat": safe_int(child.get(q("table", "number-columns-repeated"), "1")),
+                "properties": column_props,
+            })
+
+        row_nodes = []
+        for child in list(element):
+            if child.tag == q("table", "table-row"):
+                row_nodes.append(child)
+            elif child.tag in {q("table", "table-rows"), q("table", "table-header-rows")}:
+                row_nodes.extend(row for row in list(child) if row.tag == q("table", "table-row"))
+
         rows = []
-        for row in element.iter(q("table", "table-row")):
+        for row in row_nodes:
+            row_style_name = row.get(q("table", "style-name"))
+            row_props = self._resolve_for_family(row_style_name, "table-row")
             cells = []
             for cell in list(row):
                 if cell.tag not in {q("table", "table-cell"), q("table", "covered-table-cell")}:
                     continue
-                cells.append(TextBlock("table_cell", children=self._parse_children(cell),
-                    attributes={"column_span": int(cell.get(q("table", "number-columns-spanned"), "1")),
-                                "row_span": int(cell.get(q("table", "number-rows-spanned"), "1")),
-                                "covered": cell.tag == q("table", "covered-table-cell"),
-                                "style_name": cell.get(q("table", "style-name"))}))
-            repeat = max(1, int(row.get(q("table", "number-rows-repeated"), "1")))
-            rows.extend([TextBlock("table_row", children=cells) for _ in range(min(repeat, 100))])
-        return TextBlock("table", children=rows,
-                         attributes={"name": element.get(q("table", "name")),
-                                     "style_name": element.get(q("table", "style-name"))})
+                cell_style_name = cell.get(q("table", "style-name"))
+                cell_props = self._resolve_for_family(cell_style_name, "table-cell")
+                cell_style = self._text_style(cell_props)
+                cell_block = TextBlock(
+                    "table_cell",
+                    children=self._parse_children(cell),
+                    style_name=cell_style_name,
+                    style=cell_style,
+                    attributes={
+                        "column_span": safe_int(cell.get(q("table", "number-columns-spanned"), "1")),
+                        "row_span": safe_int(cell.get(q("table", "number-rows-spanned"), "1")),
+                        "covered": cell.tag == q("table", "covered-table-cell"),
+                        "style_name": cell_style_name,
+                        "style_properties": cell_props,
+                        "background_color": cell_props.get(q("fo", "background-color")),
+                        "vertical_align": cell_props.get(q("style", "vertical-align")),
+                        "padding": cell_props.get(q("fo", "padding")),
+                        "border": cell_props.get(q("fo", "border")),
+                        "text_align": cell_props.get(q("fo", "text-align")),
+                    },
+                )
+                repeat = safe_int(cell.get(q("table", "number-columns-repeated"), "1"))
+                cells.extend([cell_block] * min(repeat, 100))
+            repeat = safe_int(row.get(q("table", "number-rows-repeated"), "1"))
+            for _ in range(min(repeat, 100)):
+                rows.append(TextBlock("table_row", children=cells, style_name=row_style_name,
+                                       attributes={"style_properties": row_props}))
+        return TextBlock(
+            "table",
+            children=rows,
+            style_name=table_style_name,
+            attributes={
+                "name": element.get(q("table", "name")),
+                "style_name": table_style_name,
+                "style_properties": table_props,
+                "columns": columns,
+            },
+        )
+
 
 
 def load_odf(path: str | Path) -> BookDocument:
