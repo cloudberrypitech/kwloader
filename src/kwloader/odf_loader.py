@@ -258,8 +258,9 @@ class ODFLoader:
         if font:
             font = self.font_faces.get(font.strip("\"'"), font)
         color = props.get(q("fo", "color"))
-        background = props.get(q("fo", "background-color")) or props.get(q("style", " background-color"))
+        background = props.get(q("fo", "background-color")) or props.get(q("style", "background-color"))
         position = (props.get(q("style", "text-position")) or "").lower()
+        letter_spacing = props.get(q("fo", "letter-spacing")) or props.get(q("style", "letter-spacing"))
         return TextStyle(
             bold=(weight or "").lower() in {"bold", "700", "800", "900"},
             italic=(italic or "").lower() in {"italic", "oblique"},
@@ -270,6 +271,7 @@ class ODFLoader:
             overline=(props.get(q("style", "text-overline-style"), "none") != "none"),
             superscript="super" in position, subscript="sub" in position,
             small_caps=props.get(q("fo", "font-variant")) == "small-caps",
+            letter_spacing=letter_spacing,
             language=props.get(q("fo", "language")), raw=dict(props),
         )
 
